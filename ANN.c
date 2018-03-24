@@ -8,7 +8,6 @@
 #define IN_DIM 2
 #define HIDDEN_DIM 4
 #define OUT_DIM 2
-#define MIN_LEARNING_RATE 0.000000001
 
 double sigmoid(double x) {
 	double result = 1.0 / (1.0 + exp(0 - x));
@@ -61,7 +60,7 @@ int main(void) {
 
 		count += 1;
 
-		if (count == 100000) {
+		if (count == 1000000) {
 			count = 0;
 		}
 
@@ -110,22 +109,6 @@ int main(void) {
 				double temp = (expected_out[i] - out[i]);
 				E += temp * temp / 2.0;
 			}
-
-#ifdef CHANGE_LEARNING_RATE
-			// Determine learning rate
-			if (E > E1 && E > E2) {
-				learning_rate *= 0.9;
-				if (learning_rate < MIN_LEARNING_RATE) {
-					learning_rate = MIN_LEARNING_RATE;
-				}
-				E1 = 1000000.0;
-				E2 = E1;
-			}
-			else {
-				E2 = E1;
-				E1 = E;
-			}
-#endif
 
 			double updated_Who[HIDDEN_DIM][OUT_DIM];
 			// Back Propagation
@@ -195,11 +178,15 @@ int main(void) {
 					printf("Who[%d]: ", i);
 					printArr(Who[i], OUT_DIM);
 				}
+#if defined(_WIN32)
 				system("pause");
+#endif
 			}
 		}
 	}
 
+#if defined(_WIN32)
 	system("pause");
+#endif
 	return 0;
 }
