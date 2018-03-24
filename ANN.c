@@ -60,7 +60,7 @@ int main(void) {
 
 		count += 1;
 
-		if (count == 100000) {
+		if (count == 1000000) {
 			count = 0;
 		}
 
@@ -178,11 +178,15 @@ int main(void) {
 					printf("Who[%d]: ", i);
 					printArr(Who[i], OUT_DIM);
 				}
+#if defined(_WIN32)
 				system("pause");
+#endif
 			}
 		}
 	}
 
+#if defined(_WIN32)
 	system("pause");
+#endif
 	return 0;
 }
