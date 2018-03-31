@@ -15,6 +15,7 @@ num_lstm_layers = 2
 num_epochs = 10
 num_steps_in_epoch = 1000
 thought_vec_dim = 10
+probability_threshold = 0.75
 
 graph = tf.Graph()
 
@@ -42,17 +43,6 @@ with graph.as_default():
         lstm_cell, model_input, sequence_length=user_input_lengths, initial_state=init_state, time_major=True
     )
 
-    # For prediction
-    prediction = tf.Variable(
-        tf.constant(0.0, shape=[output_time_intervals, num_pitches]), dtype=tf.float32, trainable=False
-    )
-
-    current_state = encoder_state
-    current_input = encoder_output[user_input_lengths[0] - 1]
-    for i in range(output_time_intervals):
-        prediction[i] = lstm_cell()
-        pass
-
     # For training
     decoder_output, decoder_state = tf.nn.dynamic_rnn(
         lstm_cell, model_gen_input, sequence_length=generator_input_lengths, initial_state=encoder_state, time_major=True
@@ -63,14 +53,54 @@ with graph.as_default():
     )
     print("final output shape:", final_output.shape)
 
-    # cross_ent = tf.nn.softmax_cross_entropy_with_logits_v2(logits=final_output, labels=generator_expected_output)
-    TINY = 1e-6
     outputs = generator_expected_output
     predicted_outputs = final_output
-    cross_ent = -(outputs * tf.log(predicted_outputs + TINY) + (1.0 - outputs) * tf.log(1.0 - predicted_outputs + TINY))
+    cross_ent = -(outputs * tf.log(predicted_outputs + 1e-6) + (1.0 - outputs) * tf.log(1.0 - predicted_outputs + 1e-6))
     loss = tf.reduce_mean(cross_ent)
 
     optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
+
+    # For prediction
+    last_encoder_lstm_output = encoder_output[user_input_lengths[0] - 1]
+
+    last_encoder_output = tf.contrib.layers.fully_connected(
+        last_encoder_lstm_output, num_outputs=num_pitches, activation_fn=tf.nn.sigmoid, scope="output_projection", reuse=True
+    )
+    current_state = encoder_state
+
+    prediction_int = tf.TensorArray(tf.int32, output_time_intervals + 1)
+    prediction_float = tf.TensorArray(tf.float32, output_time_intervals + 1)
+
+    current_input = last_encoder_output
+    current_input_int = tf.cast(current_input + tf.constant(1.0 - probability_threshold, tf.float32), tf.int32)
+
+    prediction_int = prediction_int.write(0, current_input_int[0])
+    prediction_float = prediction_float.write(0, current_input[0])
+    print(current_input_int[0].shape)
+
+    current_input = tf.cast(current_input_int, tf.float32)
+    current_lstm_input = tf.contrib.layers.fully_connected(
+        current_input, num_outputs=thought_vec_dim, activation_fn=tf.nn.sigmoid, reuse=True, scope="input_embedding"
+    )
+
+    for i in range(output_time_intervals):
+        current_lstm_output, current_state = lstm_cell(current_lstm_input, current_state)
+        current_output = tf.contrib.layers.fully_connected(
+            current_lstm_output, num_outputs=num_pitches, activation_fn=tf.nn.sigmoid, scope="output_projection", reuse=True
+        )
+        current_input = current_output
+        current_input_int = tf.cast(current_input + tf.constant(1.0 - probability_threshold, tf.float32), tf.int32)
+
+        prediction_int = prediction_int.write(i + 1, current_input_int[0])
+        prediction_float = prediction_float.write(i + 1, current_input[0])
+
+        current_input = tf.cast(current_input_int, tf.float32)
+        current_lstm_input = tf.contrib.layers.fully_connected(
+            current_input, num_outputs=thought_vec_dim, activation_fn=tf.nn.sigmoid, reuse=True, scope="input_embedding"
+        )
+
+    final_prediction_int = prediction_int.gather([i for i in range(output_time_intervals + 1)])
+    final_prediction_float = prediction_float.gather([i for i in range(output_time_intervals + 1)])
 
 myMusicLib = [
     [
@@ -426,21 +456,21 @@ decoder_expected_output = [
 decoder_input_lengths = [output_time_intervals for _ in range(batch_size)]
 
 test_music = [
-    [0, 0, 1, 0, 0, 0, 0],
-    [0, 0, 1, 0, 0, 0, 0],
-    [0, 0, 1, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 1, 0],
-    [0, 0, 0, 0, 0, 1, 0],
-    [0, 0, 0, 0, 0, 1, 0],
+    [0, 0, 0, 0, 1, 0, 0],
+    [0, 0, 0, 0, 1, 0, 0],
+    [0, 0, 0, 0, 1, 0, 0],
     [0, 0, 0, 0, 0, 0, 0],
     [0, 0, 0, 1, 0, 0, 0],
     [0, 0, 0, 1, 0, 0, 0],
     [0, 0, 0, 1, 0, 0, 0],
     [0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 1, 0],
-    [0, 0, 0, 0, 0, 1, 0],
-    [0, 0, 0, 0, 0, 1, 0],
+    [0, 0, 1, 0, 0, 0, 0],
+    [0, 0, 1, 0, 0, 0, 0],
+    [0, 0, 1, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0],
+    [0, 1, 0, 0, 0, 0, 0],
+    [0, 1, 0, 0, 0, 0, 0],
+    [0, 1, 0, 0, 0, 0, 0],
     [0, 0, 0, 0, 0, 0, 0]
 ]
 test_encoder_input_batch = [[test_music[t]] for t in range(input_time_intervals)]
@@ -471,4 +501,14 @@ with tf.Session(graph=graph) as sess:
         print("model output:", model_out)
         print("epoch:", epoch + 1)
         print("loss:", avg_loss)
+
+    print("Start testing . . .")
+    pred_int, pred_float = sess.run([final_prediction_int, final_prediction_float], {
+        user_input: test_encoder_input_batch,
+        user_input_lengths: test_encoder_input_lengths
+    })
+    print("prediction (float):")
+    print(pred_float)
+    print("prediction (integer):")
+    print(pred_int)
     pass
